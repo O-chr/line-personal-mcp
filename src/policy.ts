@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type Perm = "read" | "write";
-export interface ChatRule { name?: string; read?: boolean; write?: boolean }
+export interface ChatRule { name?: string; read?: boolean; write?: boolean; group?: boolean }
 export interface Config { chats: Record<string, ChatRule>; confirm_send: boolean }
 
 export const CONFIG_PATH = process.env.LINE_MCP_CONFIG ?? join(homedir(), ".config", "line-personal-mcp", "config.json");
@@ -28,5 +28,7 @@ export function loadConfig(path = CONFIG_PATH): Config {
 export function allowed(perm: Perm, chatId: string, cfg: Config, tools: Set<Perm>): boolean {
   if (!isValidChatId(chatId) || !tools.has(perm)) return false;
   const rule = Object.hasOwn(cfg.chats, chatId) ? cfg.chats[chatId] : undefined;
+  // IDs starting with 'U' are individuals; groups (C) and rooms (R) need an explicit group:true opt-in.
+  if (!chatId.startsWith("U") && rule?.group !== true) return false;
   return rule?.[perm] === true;
 }
