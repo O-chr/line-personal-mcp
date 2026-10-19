@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import express from "express";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
@@ -8,8 +11,11 @@ import { GoogleGatedProvider } from "./auth.js";
 
 const need = (k: string) => { const v = process.env[k]; if (!v) { console.error(`missing env ${k}`); process.exit(1); } return v; };
 const publicUrl = need("LINE_MCP_PUBLIC_URL").replace(/\/$/, ""); // e.g. https://line-mcp.example.com
+// Google OAuth client JSON as downloaded from Google Cloud (kept 0600, never logged).
+const googleJson = process.env.GOOGLE_OAUTH_JSON ?? join(homedir(), ".config", "line-personal-mcp", "google-oauth.json");
+const google = JSON.parse(readFileSync(googleJson, "utf8")).web as { client_id: string; client_secret: string };
 const provider = new GoogleGatedProvider({
-  clientId: need("GOOGLE_CLIENT_ID"), clientSecret: need("GOOGLE_CLIENT_SECRET"),
+  clientId: google.client_id, clientSecret: google.client_secret,
   publicUrl, allowedEmail: need("LINE_MCP_ALLOWED_EMAIL"),
 });
 
