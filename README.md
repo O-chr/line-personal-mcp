@@ -15,3 +15,10 @@ Personal stdio MCP server over the private `line` CLI (`O-chr/line-cli-private`)
 `claude mcp add line -e LINE_MCP_PERMISSIONS=read -- node ~/code/line-personal-mcp/dist/index.js`
 
 Tools: `line_status`, `line_list_chats`, `line_read_messages`, `line_send_message`.
+
+## Remote (ChatGPT) via HTTP + Google sign-in
+`node dist/http.js` serves `/mcp` (Streamable HTTP, stateless) on 127.0.0.1 and acts as its own OAuth server (dynamic client registration, PKCE). The login step is delegated to Google, and **only `LINE_MCP_ALLOWED_EMAIL` (verified) can obtain a token**. Access tokens last 1h; refresh tokens rotate (30d). Tokens are stored hashed in `~/.config/line-personal-mcp/oauth.json` (0600).
+
+Env: `LINE_MCP_PUBLIC_URL` (https URL of the tunnel), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `LINE_MCP_ALLOWED_EMAIL`, optional `PORT` (8787), `LINE_MCP_PERMISSIONS` (keep `read` at first).
+Google Cloud OAuth client (Web): authorized redirect URI = `<PUBLIC_URL>/oauth/google/callback`.
+Expose with Cloudflare Tunnel to 127.0.0.1:8787, then add `<PUBLIC_URL>/mcp` as a ChatGPT custom connector (OAuth).
