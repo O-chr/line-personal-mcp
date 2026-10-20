@@ -40,6 +40,31 @@ The official packaging guide's [Create and test a plugin locally with an MCP ser
 
 Prepared the ChatGPT web registration form for **個人LINE MCP**, using the unchanged endpoint `https://line-mcp.o-chr.jp/mcp` and OAuth. ChatGPT successfully discovered `/authorize`, `/token`, and `/register` and selected DCR. No Google client secret, LINE session, or OAuth token was copied into the form. Creating/connecting the authenticated ChatGPT integration still requires action-time confirmation; until it is completed and a normal chat returns nine rows, the issue remains open.
 
+## Authenticated hosted connection and package repair
+
+After the user's explicit confirmation, created **個人LINE MCP** through the supported ChatGPT web UI. The user completed the Google login. The connection is installed and has its own management and chat actions.
+
+- Registered connection: [個人LINE MCP](https://chatgpt.com/plugins/plugin_asdk_app_6ad7579edc1c8191a67fbb79a9600e9e)
+- Verified App ID, copied from that connection's `.app.json`: `asdk_app_6ad7579edc1c8191a67fbb79a9600e9e`
+- Updated the existing **個人LINE** plugin (same identity, USER scope and PRIVATE visibility) to `0.1.1`, adding `.app.json` and `extensions.com.openai.apps`.
+- Updated release: `pluginrel_6ad75815f62c8191bc03fbbdecb5dbdf`. Read-back confirmed the App binding, original MCP configuration, and skill are present.
+- Re-ran `npx tsc` and `npm test`. No runtime source or policy changes, installation of the LINE binary, restart, public URL/DNS/tunnel changes, or LINE sends are involved.
+
+Started a normal **Chat** conversation using the connection's **チャットで試す** action and requested only the actual `line_list_chats` result and read/write flags. The final result is recorded below after verification.
+
+## Final verification
+
+**Passed in normal ChatGPT Chat**, through the authenticated hosted App connection:
+
+- [Verification conversation: LINEチャット一覧表示](https://chatgpt.com/c/6ad75838-483c-83ee-ae02-218d0a3758d4)
+- The response displayed the expected **nine allowed chats**, each with `read: true` and `write: false`; readable count 9, writable count 0. Names and IDs are deliberately not copied into this repository.
+- The conversation UI includes the connection's tool activity; the server also received authenticated requests from the hosted `openai-mcp/1.0.0 (Codex)` client, separately from the local `codex-mcp-client` requests.
+- The installed App exposes only `line_status`, `line_list_chats`, and `line_read_messages`. No send tool is exposed. Message bodies were not requested and no LINE messages were sent.
+- `npx tsc` and `npm test` succeeded (7/7). Package read-back confirmed version 0.1.1, the verified App binding, the existing skill/MCP config, USER scope, and PRIVATE visibility.
+- The deployment still uses the same permitted Google account, `LINE_MCP_PERMISSIONS=read`, and `confirm_send=true`. The default-deny and encrypted-only sending implementation is unchanged.
+
+This verification used ChatGPT **web Chat**, which shares the account's hosted connection and conversation with the desktop app. Native desktop UI automation remains unavailable, so its rendering and any stale desktop cache were not separately tested. If an already-open desktop conversation still lacks tools, use a new Chat conversation with **個人LINE MCP** or the updated **個人LINE** plugin selected.
+
 ## Official references
 
 - [MCP configuration and hosted ChatGPT connections](https://learn.chatgpt.com/docs/extend/mcp?surface=cli): hosted ChatGPT uses installed plugins; local Codex configuration is not read by ChatGPT web.

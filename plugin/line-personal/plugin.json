@@ -1,11 +1,12 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "line-personal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read the owner's explicitly allowed personal LINE chats through the existing Google-authenticated MCP server.",
   "author": { "name": "岡林智晴" },
   "extensions": {
     "com.openai": {
+      "apps": "./.app.json",
       "interface": {
         "displayName": "個人LINE",
         "shortDescription": "許可済みの個人LINEトークを読む",
