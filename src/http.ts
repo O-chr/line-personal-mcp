@@ -21,6 +21,15 @@ const provider = new GoogleGatedProvider({
 
 const app = express();
 app.set("trust proxy", 1);
+// Secret-free access log: method, path (no query string), status, client UA.
+app.use((req, res, next) => {
+  res.on("finish", () => console.error(`${new Date().toISOString()} ${req.method} ${req.path} ${res.statusCode} ${String(req.headers["user-agent"] ?? "").slice(0, 60)}`));
+  next();
+});
+// Some clients (ChatGPT) look up protected-resource metadata at the root path first.
+app.get("/.well-known/oauth-protected-resource", (_req, res) => {
+  res.json({ resource: `${publicUrl}/mcp`, authorization_servers: [`${publicUrl}/`], bearer_methods_supported: ["header"] });
+});
 app.use(mcpAuthRouter({ provider, issuerUrl: new URL(publicUrl), resourceServerUrl: new URL(`${publicUrl}/mcp`) }));
 
 app.get("/oauth/google/callback", async (req, res) => {
