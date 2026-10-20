@@ -23,7 +23,7 @@ const app = express();
 app.set("trust proxy", 1);
 // Secret-free access log: method, path (no query string), status, client UA.
 app.use((req, res, next) => {
-  res.on("finish", () => console.error(`${new Date().toISOString()} ${req.method} ${req.path} ${res.statusCode} ${String(req.headers["user-agent"] ?? "").slice(0, 60)}`));
+  res.on("finish", () => console.error(`${new Date().toISOString()} ${req.method} ${req.originalUrl.split("?")[0]} ${res.statusCode} ${String(req.headers["user-agent"] ?? "").slice(0, 60)}`));
   next();
 });
 // Some clients (ChatGPT) look up protected-resource metadata at the root path first.
