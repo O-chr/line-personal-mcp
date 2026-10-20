@@ -30,6 +30,16 @@ Created as a **USER-scoped, PRIVATE** plugin (not shared or public):
 
 The nine-chat tool result above is verified **in Codex**, not in normal ChatGPT Chat. The app UI automation tool refused access to this app, and the thread reader returned content references rather than the text of earlier ChatGPT answers. Neither limitation was bypassed. Final ChatGPT verification requires the installed plugin to invoke `line_list_chats` in that surface and return the same allowed nine chats. Plugin creation or an HTTP 200 alone does not establish completion.
 
+## Follow-up: installed skill without ChatGPT tools
+
+The user tested the installed plugin in normal ChatGPT Chat and reported that the skill loaded but `line_list_chats` was absent. The package upload above did **not** complete the ChatGPT MCP registration.
+
+The supported ChatGPT web UI was then inspected separately from the blocked native app UI. The `line-personal` detail page shows **MCP servers: 1** and **Skills: 1**, with no App binding or OAuth management action. The working official LINE integration shows **Apps: 1**, a management link, and a chat action. Reading back the personal package confirms that `mcp.json` exists but `.app.json` and `extensions.com.openai.apps` are absent.
+
+The official packaging guide's [Create and test a plugin locally with an MCP server](https://developers.openai.com/plugins/build/plugins#create-and-test-a-plugin-locally-with-an-mcp-server) explicitly requires registering the connection with **Add custom MCP server**, then using the returned `plugin_asdk_app...` identity for the App mapping. A portable remote MCP entry alone did not provision that hosted connection in this case. Keep the current package identity; bind only a verified App ID after registration, never fabricate one.
+
+Prepared the ChatGPT web registration form for **個人LINE MCP**, using the unchanged endpoint `https://line-mcp.o-chr.jp/mcp` and OAuth. ChatGPT successfully discovered `/authorize`, `/token`, and `/register` and selected DCR. No Google client secret, LINE session, or OAuth token was copied into the form. Creating/connecting the authenticated ChatGPT integration still requires action-time confirmation; until it is completed and a normal chat returns nine rows, the issue remains open.
+
 ## Official references
 
 - [MCP configuration and hosted ChatGPT connections](https://learn.chatgpt.com/docs/extend/mcp?surface=cli): hosted ChatGPT uses installed plugins; local Codex configuration is not read by ChatGPT web.
