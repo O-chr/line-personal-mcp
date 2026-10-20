@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "line-personal",
+  "version": "0.1.0",
+  "description": "Read the owner's explicitly allowed personal LINE chats through the existing Google-authenticated MCP server.",
+  "author": { "name": "岡林智晴" },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "個人LINE",
+        "shortDescription": "許可済みの個人LINEトークを読む",
+        "longDescription": "Mac miniで動く個人LINE MCPに接続し、本人が許可した友人・グループのトーク一覧と最近のメッセージを読み取ります。Googleによる本人認証が必要です。サーバーは読み取り専用で運用します。",
+        "developerName": "岡林智晴",
+        "category": "Productivity",
+        "defaultPrompt": "個人LINEの line_list_chats を呼び、許可済みチャット一覧を見せて。"
+      }
+    }
+  }
+}
