@@ -6,12 +6,14 @@ import { runLine } from "./line.js";
 
 export function buildServer(): McpServer {
   const tools = toolPerms();
-  const server = new McpServer({ name: "line-personal-mcp", version: "0.1.0" });
+  const server = new McpServer({ name: "line-personal-mcp", version: "0.1.0" }, {
+    instructions: "Personal LINE (個人LINE) account of the owner: friends and group chats, NOT a LINE Official Account. Use line_list_chats first to see which chats are allowed, then line_read_messages with a chat id.",
+  });
   const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }], isError });
   const denied = (perm: string) => text(`Denied: this chat is not allowed for ${perm}. Permissions are managed by the owner outside MCP.`, true);
 
   server.registerTool("line_status", {
-    description: "Show LINE login state and which MCP permissions (read/write) are enabled.",
+    description: "Personal LINE (個人LINE, not an Official Account): show login state and which permissions (read/write) are enabled.",
     annotations: { readOnlyHint: true },
   }, async () => {
     const r = await runLine(["auth", "status"]);
@@ -19,7 +21,7 @@ export function buildServer(): McpServer {
   });
 
   server.registerTool("line_list_chats", {
-    description: "List the chats the owner has allowed for this MCP, with their read/write permission. Other chats are never shown.",
+    description: "Personal LINE (個人LINE): list the friend and group chats (トーク) the owner allowed, with chat id and read/write permission. Other chats are never shown.",
     annotations: { readOnlyHint: true },
   }, async () => {
     const cfg = loadConfig();
@@ -31,7 +33,7 @@ export function buildServer(): McpServer {
   });
 
   if (tools.has("read")) server.registerTool("line_read_messages", {
-    description: "Read recent messages from an allowed chat (by chat id from line_list_chats).",
+    description: "Personal LINE (個人LINE): read recent messages from an allowed chat. Get chat_id from line_list_chats.",
     inputSchema: { chat_id: z.string(), limit: z.number().int().min(1).max(50).default(20) },
     annotations: { readOnlyHint: true },
   }, async ({ chat_id, limit }) => {
@@ -41,7 +43,7 @@ export function buildServer(): McpServer {
   });
 
   if (tools.has("write")) server.registerTool("line_send_message", {
-    description: "Send a text message to an allowed chat. The owner is asked to confirm each send.",
+    description: "Personal LINE (個人LINE): send a text message to an allowed chat. The owner is asked to confirm each send.",
     inputSchema: { chat_id: z.string(), text: z.string().min(1).max(2000) },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, async ({ chat_id, text: body }) => {
