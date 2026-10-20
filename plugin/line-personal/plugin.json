@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "line-personal",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Read the owner's explicitly allowed personal LINE chats through the existing Google-authenticated MCP server.",
   "author": { "name": "岡林智晴" },
   "extensions": {
