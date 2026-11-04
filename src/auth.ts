@@ -1,16 +1,17 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { Response } from "express";
 import type { OAuthServerProvider, AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { InvalidGrantError, InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 const STORE = process.env.LINE_MCP_OAUTH_STORE ?? join(homedir(), ".config", "line-personal-mcp", "oauth.json");
 const ACCESS_TTL = 3600, REFRESH_TTL = 30 * 86400, CODE_TTL = 300, PENDING_TTL = 600;
+const REFRESH_RETRY_TTL = 30;
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const rand = () => randomBytes(32).toString("base64url");
 const now = () => Math.floor(Date.now() / 1000);
@@ -20,11 +21,20 @@ interface Code { clientId: string; challenge: string; redirectUri: string; exp: 
 interface Tok { clientId: string; exp: number; refresh?: boolean }
 interface Data { clients: Record<string, OAuthClientInformationFull>; tokens: Record<string, Tok> } // tokens keyed by sha256
 
-function load(): Data {
-  if (!existsSync(STORE)) return { clients: {}, tokens: {} };
-  return JSON.parse(readFileSync(STORE, "utf8"));
+function load(path: string): Data {
+  if (!existsSync(path)) return { clients: {}, tokens: {} };
+  return JSON.parse(readFileSync(path, "utf8"));
 }
-function save(d: Data) { mkdirSync(dirname(STORE), { recursive: true }); writeFileSync(STORE, JSON.stringify(d), { mode: 0o600 }); }
+function save(path: string, d: Data) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${randomBytes(8).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(d), { mode: 0o600, flag: "wx" });
+    renameSync(tmp, path);
+  } finally {
+    if (existsSync(tmp)) unlinkSync(tmp);
+  }
+}
 
 export interface GoogleCfg { clientId: string; clientSecret: string; publicUrl: string; allowedEmail: string }
 
@@ -34,17 +44,34 @@ function idTokenClaims(idToken: string): { email?: string; email_verified?: bool
 }
 
 export class GoogleGatedProvider implements OAuthServerProvider {
-  private data = load();
+  private data: Data;
+  private storePath: string;
+  private clock: () => number;
+  // Retry responses stay only in memory; the on-disk store keeps token hashes.
+  private refreshRetries = new Map<string, { clientId: string; exp: number; tokens: OAuthTokens }>();
   private pending = new Map<string, Pending>();
   private codes = new Map<string, Code>();
-  constructor(private g: GoogleCfg) {}
+  constructor(private g: GoogleCfg, options: { storePath?: string; now?: () => number } = {}) {
+    this.storePath = options.storePath ?? STORE;
+    this.clock = options.now ?? now;
+    this.data = load(this.storePath);
+  }
+
+  private save() { save(this.storePath, this.data); }
+
+  private pruneRetries() {
+    for (const [key, retry] of this.refreshRetries) {
+      const successor = this.data.tokens[sha(retry.tokens.refresh_token!)];
+      if (retry.exp <= this.clock() || !successor?.refresh || successor.exp <= this.clock()) this.refreshRetries.delete(key);
+    }
+  }
 
   get clientsStore(): OAuthRegisteredClientsStore {
     return {
       getClient: (id) => this.data.clients[id],
       registerClient: (c) => {
-        const full = { ...c, client_id: randomBytes(16).toString("hex"), client_id_issued_at: now() } as OAuthClientInformationFull;
-        this.data.clients[full.client_id] = full; save(this.data); return full;
+        const full = { ...c, client_id: randomBytes(16).toString("hex"), client_id_issued_at: this.clock() } as OAuthClientInformationFull;
+        this.data.clients[full.client_id] = full; this.save(); return full;
       },
     };
   }
@@ -52,7 +79,7 @@ export class GoogleGatedProvider implements OAuthServerProvider {
   /** Step 1: send the user to Google. */
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
     const state = rand();
-    this.pending.set(state, { client, params, exp: now() + PENDING_TTL });
+    this.pending.set(state, { client, params, exp: this.clock() + PENDING_TTL });
     const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     u.search = new URLSearchParams({
       client_id: this.g.clientId, redirect_uri: `${this.g.publicUrl}/oauth/google/callback`,
@@ -65,7 +92,7 @@ export class GoogleGatedProvider implements OAuthServerProvider {
   async handleGoogleCallback(code: string, state: string): Promise<string> {
     const p = this.pending.get(state);
     this.pending.delete(state);
-    if (!p || p.exp < now()) throw new Error("expired or unknown state");
+    if (!p || p.exp < this.clock()) throw new Error("expired or unknown state");
     const r = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ code, client_id: this.g.clientId, client_secret: this.g.clientSecret, redirect_uri: `${this.g.publicUrl}/oauth/google/callback`, grant_type: "authorization_code" }),
@@ -74,7 +101,7 @@ export class GoogleGatedProvider implements OAuthServerProvider {
     const claims = idTokenClaims((await r.json() as { id_token: string }).id_token);
     if (claims.aud !== this.g.clientId || claims.email_verified !== true || claims.email?.toLowerCase() !== this.g.allowedEmail.toLowerCase()) throw new Error("this Google account is not allowed");
     const mcpCode = rand();
-    this.codes.set(mcpCode, { clientId: p.client.client_id, challenge: p.params.codeChallenge, redirectUri: p.params.redirectUri, exp: now() + CODE_TTL });
+    this.codes.set(mcpCode, { clientId: p.client.client_id, challenge: p.params.codeChallenge, redirectUri: p.params.redirectUri, exp: this.clock() + CODE_TTL });
     const back = new URL(p.params.redirectUri);
     back.searchParams.set("code", mcpCode);
     if (p.params.state) back.searchParams.set("state", p.params.state);
@@ -83,40 +110,61 @@ export class GoogleGatedProvider implements OAuthServerProvider {
 
   async challengeForAuthorizationCode(_c: OAuthClientInformationFull, code: string): Promise<string> {
     const c = this.codes.get(code);
-    if (!c || c.exp < now()) throw new Error("invalid code");
+    if (!c || c.exp <= this.clock()) throw new InvalidGrantError("Invalid or expired authorization code.");
     return c.challenge;
   }
 
   private issue(clientId: string): OAuthTokens {
     const access = rand(), refresh = rand();
-    this.data.tokens[sha(access)] = { clientId, exp: now() + ACCESS_TTL };
-    this.data.tokens[sha(refresh)] = { clientId, exp: now() + REFRESH_TTL, refresh: true };
-    for (const [k, t] of Object.entries(this.data.tokens)) if (t.exp < now()) delete this.data.tokens[k];
-    save(this.data);
+    this.data.tokens[sha(access)] = { clientId, exp: this.clock() + ACCESS_TTL };
+    this.data.tokens[sha(refresh)] = { clientId, exp: this.clock() + REFRESH_TTL, refresh: true };
+    for (const [k, t] of Object.entries(this.data.tokens)) if (t.exp < this.clock()) delete this.data.tokens[k];
+    this.save();
     return { access_token: access, token_type: "Bearer", expires_in: ACCESS_TTL, refresh_token: refresh };
   }
 
   async exchangeAuthorizationCode(client: OAuthClientInformationFull, code: string, _v?: string, redirectUri?: string): Promise<OAuthTokens> {
     const c = this.codes.get(code);
     this.codes.delete(code); // single use
-    if (!c || c.exp < now() || c.clientId !== client.client_id || (redirectUri && redirectUri !== c.redirectUri)) throw new Error("invalid code");
+    if (!c || c.exp <= this.clock() || c.clientId !== client.client_id || (redirectUri && redirectUri !== c.redirectUri)) throw new InvalidGrantError("Invalid or expired authorization code.");
     return this.issue(client.client_id);
   }
 
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string): Promise<OAuthTokens> {
-    const t = this.data.tokens[sha(refreshToken)];
-    if (!t?.refresh || t.exp < now() || t.clientId !== client.client_id) throw new Error("invalid refresh token");
-    delete this.data.tokens[sha(refreshToken)]; // rotate
-    return this.issue(client.client_id);
+    this.pruneRetries();
+    const key = sha(refreshToken);
+    const retry = this.refreshRetries.get(key);
+    if (retry?.clientId === client.client_id) {
+      console.error(`${new Date().toISOString()} oauth_refresh retry_recovered`);
+      return { ...retry.tokens };
+    }
+    const t = this.data.tokens[key];
+    if (!t?.refresh || t.exp <= this.clock() || t.clientId !== client.client_id) {
+      const reason = !t?.refresh ? "unknown_or_spent" : t.exp <= this.clock() ? "expired" : "client_mismatch";
+      console.error(`${new Date().toISOString()} oauth_refresh rejected reason=${reason}`);
+      throw new InvalidGrantError("Invalid or expired refresh token; reconnect this account.");
+    }
+    delete this.data.tokens[key]; // rotate
+    let tokens: OAuthTokens;
+    try {
+      tokens = this.issue(client.client_id);
+    } catch (error) {
+      // A failed atomic write leaves the previous persisted token usable.
+      this.data = load(this.storePath);
+      throw error;
+    }
+    this.pruneRetries(); // Once the successor rotates, older retries stop working.
+    this.refreshRetries.set(key, { clientId: client.client_id, exp: Math.min(this.clock() + REFRESH_RETRY_TTL, t.exp), tokens });
+    return { ...tokens };
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     const t = this.data.tokens[sha(token)];
-    if (!t || t.refresh || t.exp < now()) throw new InvalidTokenError("invalid token");
+    if (!t || t.refresh || t.exp < this.clock()) throw new InvalidTokenError("invalid token");
     return { token, clientId: t.clientId, scopes: [], expiresAt: t.exp };
   }
 
   async revokeToken(_c: OAuthClientInformationFull, req: { token: string }): Promise<void> {
-    delete this.data.tokens[sha(req.token)]; save(this.data);
+    delete this.data.tokens[sha(req.token)]; this.save(); this.pruneRetries();
   }
 }

@@ -23,6 +23,27 @@ Env: `LINE_MCP_PUBLIC_URL` (https URL of the tunnel), `LINE_MCP_ALLOWED_EMAIL`, 
 Google Cloud OAuth client (Web): authorized redirect URI = `<PUBLIC_URL>/oauth/google/callback`.
 Expose with Cloudflare Tunnel to 127.0.0.1:8787, then add `<PUBLIC_URL>/mcp` as a ChatGPT custom connector (OAuth).
 
+### Automatic OAuth renewal
+
+Access tokens expire after 1 hour. The client renews them using a rotating refresh
+token valid for 30 days from its issuance; a successful renewal starts a new
+30-day refresh-token lifetime. No periodic manual sign-in is needed while renewal
+works and the connection is used within that interval.
+
+The server tolerates concurrent refresh requests or a lost response by returning
+the **same** token pair for a retry by the same client within 30 seconds. This
+window never extends beyond the original token's expiry, and ends immediately
+when the successor refresh token is used or revoked. Retry responses are kept in
+memory only, so restarting the server ends this window. Only token hashes are
+persisted, using an atomic file replacement with mode 0600. Invalid grants return
+OAuth `invalid_grant` (HTTP 400), not a generic server error. Logs distinguish
+expired, unknown/spent, and wrong-client refresh failures without recording tokens.
+
+Reconnection is still needed after 30 days without renewal, revocation, or loss
+of a rotated token beyond the retry window. The underlying LINE login is separate:
+if LINE invalidates that session (for example after another Chrome-style client
+signs in), OAuth renewal cannot repair it; LINE login is required again.
+
 ## ChatGPT Chat and Codex use different connection registrations
 
 Adding `line_mcp` to Settings → MCP / `~/.codex/config.toml` connects the local Codex client. A successful `initialize` or `tools/list` from `codex-mcp-client` does not demonstrate that a normal ChatGPT Chat has the tools. ChatGPT needs its own installed plugin and OAuth connection. The existing LINE Official Account plugin is a separate account-backed integration; changing the personal server's HTTP transport or weakening OAuth will not create that registration.
